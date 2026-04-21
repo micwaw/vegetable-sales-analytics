@@ -1,0 +1,40 @@
+ 
+{
+  
+  
+"product": "Marchew",
+  
+  
+"trend": "increasing",
+  
+  
+"trend_change_percent": 49,
+  
+  
+"recommended_action": "Reduce daily outflow to ~800 kg/day (~-28.49%) via promotions, transfer excess stock to other channels, or slow incoming deliveries; monitor sales weekly.",
+  
+  
+"sales_adjustment_percent": -28.49,
+  
+  
+"confidence": "high",
+  
+  
+"plon_kg": 283000,
+  
+  
+"zuzycie_kg": 247020,
+  
+  
+"depletionDate": "2026-05-21",
+  
+  
+"daysRemaining": 32,
+  
+  
+"urgency": "HIGH",
+  
+  
+"comment": "With 35,980 kg remaining and current pace, stock will deplete in 32 days vs 45 days needed to hit target — accelerate mitigation immediately."
+  
+}
