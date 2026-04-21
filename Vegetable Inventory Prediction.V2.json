@@ -1,0 +1,421 @@
+{
+  "name": "Vegetable Inventory Prediction.V2",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a data analyst.\n\n=== INPUT DATA ===\n{{ JSON.stringify($json) }}\n\n=== TARGET DATES ===\nMarchew: 2026-06-05\nPietruszka: 2026-07-26\nSeler: 2026-06-10\nZiemniaki: 2026-05-30\n\n=== RULES ===\n\nUse:\n- pozostalo_kg (remaining stock)\n- srednia_dzienna_kg (current sales speed)\n- dni_do_konca\n- trend_change_percent\n\n=== CALCULATIONS ===\n\n1. Calculate days to target:\ndays_to_target = days between TODAY and target_date\n\n2. Compare:\n- if dni_do_konca > days_to_target → \"too slow\"\n- if dni_do_konca < days_to_target → \"too fast\"\n- else → \"on track\"\n\n3. Required sales:\nnew_daily_sales = pozostalo_kg / days_to_target\n\nsales_adjustment_percent =\n((new_daily_sales - srednia_dzienna_kg) / srednia_dzienna_kg) * 100\n\n4. Trend:\n- >10 → \"increasing\"\n- <-10 → \"decreasing\"\n- else → \"stable\"\n\n5. Urgency:\n- difference > 60 days → LOW\n- 20–60 → MEDIUM\n- <20 → HIGH\n\n=== OUTPUT ===\n\nReturn ONLY valid JSON:\n\n[\n  {\n    \"product\": \"...\",\n    \"target_date\": \"...\",\n    \"depletion_status\": \"...\",\n    \"trend\": \"...\",\n    \"trend_change_percent\": number,\n    \"recommended_action\": \"...\",\n    \"sales_adjustment_percent\": number,\n    \"urgency\": \"...\",\n    \"comment\": \"...\",\n    \"confidence\": \"high\"\n  }\n]\n\nNO text outside JSON.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an inventory analyst for a wholesale vegetables company. Your role is to analyze inventory data and provide accurate predictions about stock duration.\n\n"
+        }
+      },
+      "id": "f6116577-ecad-46b8-82a3-57b6bb93e115",
+      "name": "Predict Inventory Duration",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        592,
+        304
+      ],
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMonth"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g",
+          "mode": "list",
+          "cachedResultName": "Dane",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Dane",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g/edit#gid=0"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        144,
+        432
+      ],
+      "id": "98774bb0-3cad-4a4c-a374-14a34b4d10c2",
+      "name": "Google Sheets Trigger",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "SqfRY2JXHoPNgaq1",
+          "name": "Google Sheets Trigger OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === KONFIGURACJA PLONÓW ===\nconst harvestConfig = {\n  \"Marchew\": 283000,\n  \"Seler\": 40000,\n  \"Pietruszka\": 142000,\n  \"Ziemniaki\": 100000\n};\n\n// === POBRANIE DANYCH ===\nconst rows = items.map(i => i.json);\n\n// === FUNKCJA: bezpieczna liczba ===\nfunction num(val) {\n  return val === \"\" || val === null || val === undefined ? 0 : Number(val);\n}\n\n// === CZYSZCZENIE + KONWERSJA ===\nrows.forEach(r => {\n  r.Marchew = num(r.Marchew);\n  r.Marchew_Gruba = num(r.Marchew_Gruba);\n  r.Marchew_Odpad = num(r.Marchew_Odpad);\n\n  r.Seler = num(r.Seler);\n\n  r.Pietruszka = num(r.Pietruszka);\n  r.Pietruszka_Gruba = num(r.Pietruszka_Gruba);\n\n  // 🥔 ziemniaki → kg\n  r.potatoes_kg =\n    num(r[\"Ziemniak [10kg w]\"]) * 10 +\n    num(r[\"Ziemniak [15kg w]\"]) * 15 +\n    num(r[\"Ziemniak Gruby\"]) * 15;\n\n  // 📅 data (DD.MM.YYYY)\n  const parts = r.Data.split(\".\");\n  r.dateObj = new Date(parts[2], parts[1] - 1, parts[0]);\n});\n\n// === SORTOWANIE ===\nrows.sort((a, b) => a.dateObj - b.dateObj);\n\n// === ZAKRES DNI ===\nconst firstDate = rows[0].dateObj;\nconst lastDate = rows[rows.length - 1].dateObj;\n\nconst daysRange = (lastDate - firstDate) / (1000 * 60 * 60 * 24);\nconst safeDays = daysRange > 0 ? daysRange : 1;\n\n// === FUNKCJA TRENDU ===\nfunction calculateTrend(product) {\n\n  const lastDate = rows[rows.length - 1].dateObj;\n\n  const last30 = rows.filter(r => (lastDate - r.dateObj) <= 30 * 86400000);\n  const prev90 = rows.filter(r => {\n    const diff = lastDate - r.dateObj;\n    return diff > 30 * 86400000 && diff <= 120 * 86400000;\n  });\n\n  function getValue(r) {\n    if (product === \"Marchew\") return r.Marchew;\n    if (product === \"Seler\") return r.Seler;\n    if (product === \"Pietruszka\") return r.Pietruszka;\n    if (product === \"Ziemniaki\") return r.potatoes_kg;\n    return 0;\n  }\n\n  function avg(arr) {\n    if (arr.length === 0) return 0;\n    return arr.reduce((sum, r) => sum + getValue(r), 0) / arr.length;\n  }\n\n  const avg30 = avg(last30);\n  const avg90 = avg(prev90);\n\n  let change = 0;\n  if (avg90 > 0) {\n    change = ((avg30 - avg90) / avg90) * 100;\n  }\n\n  return {\n    avg30: Math.round(avg30),\n    avg90: Math.round(avg90),\n    change: Math.round(change)\n  };\n}\n\n// === ANALIZA ===\nconst results = [];\n\nfor (const product in harvestConfig) {\n\n  let totalUsed = 0;\n\n  rows.forEach(r => {\n\n    // 🥕 MARCHEW\n    if (product === \"Marchew\") {\n      totalUsed += r.Marchew + r.Marchew_Gruba + r.Marchew_Odpad;\n    }\n\n    // 🌿 PIETRUSZKA (uwzględnia odpad)\n    else if (product === \"Pietruszka\") {\n      const waste = r.Pietruszka * 0.25;\n      totalUsed += r.Pietruszka + r.Pietruszka_Gruba + waste;\n    }\n\n    // 🥔 ZIEMNIAKI\n    else if (product === \"Ziemniaki\") {\n      totalUsed += r.potatoes_kg;\n    }\n\n    // 🧄 SELER\n    else {\n      totalUsed += r.Seler;\n    }\n  });\n\n  const harvest = harvestConfig[product];\n\n  // ✅ KLUCZOWA POPRAWKA\n  const remaining = Math.max(0, harvest - totalUsed);\n\n  const avgDaily = totalUsed / safeDays;\n\n  const daysLeft = avgDaily > 0 ? remaining / avgDaily : 0;\n\n  // ✅ DATA OD OSTATNIEJ SPRZEDAŻY\n  const depletionDate = new Date(lastDate);\n  depletionDate.setDate(depletionDate.getDate() + daysLeft);\n\n  const trend = calculateTrend(product);\n\n  results.push({\n    produkt: product,\n    plon_kg: Math.round(harvest),\n    zuzycie_kg: Math.round(totalUsed),\n    pozostalo_kg: Math.round(remaining),\n    srednia_dzienna_kg: Math.round(avgDaily),\n    dni_do_konca: Math.round(daysLeft),\n    data_konca: depletionDate.toISOString().split(\"T\")[0],\n\n    trend_30: trend.avg30,\n    trend_90: trend.avg90,\n    trend_change_percent: trend.change\n  });\n}\n\n// === OUTPUT ===\nreturn results.map(r => ({\n  json: r\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        432
+      ],
+      "id": "b9e06dc5-4c27-45a9-a72d-3801e090f39e",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g",
+          "mode": "list",
+          "cachedResultName": "Dane",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 860139808,
+          "mode": "list",
+          "cachedResultName": "AI Opinion",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-w1aTHvRF4d_dJqFg_JHO1sNT45GsiQCFy7IzeAy80g/edit#gid=860139808"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product": "={{ $json.product }}",
+            "trend": "={{ $json.trend }}",
+            "trend_change_percent": "={{ $json.trend_change_percent }}",
+            "recommended_action": "={{ $json.recommended_action }}",
+            "sales_adjustment_percent": "={{ $json.sales_adjustment_percent }}",
+            "confidence": "={{ $json.confidence }}",
+            "plon_kg": "={{ $json.plon_kg }}",
+            "zuzycie_kg": "={{ $json.zuzycie_kg }}",
+            "depletionDate": "={{ $json.depletionDate }}",
+            "daysRemaining": "={{ $json.daysRemaining }}",
+            "urgency": "={{ $json.urgency }}",
+            "comment": "={{ $json.comment }}"
+          },
+          "matchingColumns": [
+            "product"
+          ],
+          "schema": [
+            {
+              "id": "product",
+              "displayName": "product",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "plon_kg",
+              "displayName": "plon_kg",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "zuzycie_kg",
+              "displayName": "zuzycie_kg",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "daysRemaining",
+              "displayName": "daysRemaining",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "depletionDate",
+              "displayName": "depletionDate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trend",
+              "displayName": "trend",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trend_change_percent",
+              "displayName": "trend_change_percent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "recommended_action",
+              "displayName": "recommended_action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sales_adjustment_percent",
+              "displayName": "sales_adjustment_percent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "urgency",
+              "displayName": "urgency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "comment",
+              "displayName": "comment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1616,
+        432
+      ],
+      "id": "39a505b3-95b5-4949-a3ef-4f558b4dfd78",
+      "name": "Append or update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "xsMCnxtxC7Oi7wmA",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n  \n  let raw = item.json.output;\n\n  // 🧠 1. string → JSON\n  let parsed;\n  try {\n    parsed = JSON.parse(raw);\n  } catch (e) {\n    continue;\n  }\n\n  const rec = parsed[0];\n  if (!rec) continue;\n\n  // 🧠 2. dodajemy też dane z wcześniejszego node\n  results.push({\n    json: {\n      product: rec.product,\n\n      // 👇 TO DODAJESZ\n      depletionDate: item.json.data_konca,\n      daysRemaining: item.json.dni_do_konca,\n\n      // 🤖 AI\n      depletion_status: rec.depletion_status,\n      trend: rec.trend,\n      trend_change_percent: rec.trend_change_percent,\n      recommended_action: rec.recommended_action,\n      sales_adjustment_percent: rec.sales_adjustment_percent,\n      comment: rec.comment,\n      confidence: rec.confidence\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        304
+      ],
+      "id": "4e4014df-9aa2-4957-87d6-c349d048aed8",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1168,
+        432
+      ],
+      "id": "324b2dee-27bb-46b3-b463-07a0883f3b4b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n\n  results.push({\n    json: {\n      product: item.json.product || item.json.produkt,\n\n      // 📊 kluczowe liczby\n      plon_kg: item.json.plon_kg,\n      zuzycie_kg: item.json.zuzycie_kg,\n\n      // 📅 czas\n      daysRemaining: item.json.dni_do_konca,\n      depletionDate: item.json.data_konca,\n\n      // 📈 trend\n      trend: item.json.trend,\n      trend_change_percent: item.json.trend_change_percent,\n\n      // 🤖 decyzja AI\n      recommended_action: item.json.recommended_action,\n      sales_adjustment_percent: item.json.sales_adjustment_percent,\n\n      // 🎯 dodatkowe\n      confidence: item.json.confidence,\n\n      // 🔥 opcjonalnie – priorytet\n      urgency: item.json.dni_do_konca < 60 ? \"HIGH\" :\n               item.json.dni_do_konca < 120 ? \"MEDIUM\" : \"LOW\",\n// 🎯 dodatkowe\n      comment: item.json.comment\n      \n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        432
+      ],
+      "id": "be3c741d-6681-4902-a8c0-6c00c1250683",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        592,
+        560
+      ],
+      "id": "402f9809-7f59-442f-ba3b-adcc93728f0b",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "lQrR2Jn2iOYmn57O",
+          "name": "OpenAI account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Predict Inventory Duration",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Predict Inventory Duration": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Append or update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Predict Inventory Duration",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "51b841bd-68c2-49e9-8701-e12c57f2ab04",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b29a2889727092cd5c5891d03b7cb81ca0f96ba481e9925a91ecf94e03eef33d"
+  },
+  "id": "VdZpjd33zfY40GTw",
+  "tags": []
+}
