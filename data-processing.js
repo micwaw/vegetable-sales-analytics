@@ -25,13 +25,13 @@ rows.forEach(r => {
   r.Pietruszka = num(r.Pietruszka);
   r.Pietruszka_Gruba = num(r.Pietruszka_Gruba);
 
-  // 🥔 ziemniaki → kg
+  //  ziemniaki → kg
   r.potatoes_kg =
     num(r["Ziemniak [10kg w]"]) * 10 +
     num(r["Ziemniak [15kg w]"]) * 15 +
     num(r["Ziemniak Gruby"]) * 15;
 
-  // 📅 data (DD.MM.YYYY)
+  //  data (DD.MM.YYYY)
   const parts = r.Data.split(".");
   r.dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
 });
@@ -99,7 +99,7 @@ for (const product in harvestConfig) {
       totalUsed += r.Marchew + r.Marchew_Gruba + r.Marchew_Odpad;
     }
 
-    // 🌿 PIETRUSZKA (uwzględnia odpad)
+    // 🌿 PIETRUSZKA 
     else if (product === "Pietruszka") {
       const waste = r.Pietruszka * 0.25;
       totalUsed += r.Pietruszka + r.Pietruszka_Gruba + waste;
@@ -118,7 +118,7 @@ for (const product in harvestConfig) {
 
   const harvest = harvestConfig[product];
 
-  // ✅ KLUCZOWA POPRAWKA
+
   const remaining = Math.max(0, harvest - totalUsed);
 
   const avgDaily = totalUsed / safeDays;
