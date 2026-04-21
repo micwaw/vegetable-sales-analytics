@@ -39,14 +39,18 @@ It helps answer key business questions:
 ##  Example Output
 
 ```json
-[
-  {
-    "product": "Carrot",
-    "remaining_kg": 35980,
-    "days_remaining": 32,
-    "trend": "increasing",
-    "recommended_action": "slow down sales",
-    "sales_adjustment_percent": -28.5,
-    "urgency": "HIGH"
-  }
-]
+ 
+{
+"product": "Marchew",
+"trend": "increasing",
+"trend_change_percent": 49,
+"recommended_action": "Reduce daily outflow to ~800 kg/day (~-28.49%) via promotions, transfer excess stock to other channels, or slow incoming deliveries; monitor sales weekly.",
+"sales_adjustment_percent": -28.49,
+"confidence": "high",
+"plon_kg": 283000,
+"zuzycie_kg": 247020,
+"depletionDate": "2026-05-21",
+"daysRemaining": 32,
+"urgency": "HIGH",
+"comment": "With 35,980 kg remaining and current pace, stock will deplete in 32 days vs 45 days needed to hit target — accelerate mitigation immediately."
+}
